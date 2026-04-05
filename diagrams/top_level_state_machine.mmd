@@ -1,45 +1,36 @@
 flowchart TD
     A([Подача питания]) --> B[Инициализация]
-    B --> C{"MaskedAlarm == 0<br/>и инициализация завершена"}
-
-    C -- Да --> E[Дежурный режим]
-    C -- Нет --> Z[Аварийный режим]
-
-    E --> D{"Полученная КУ"}
-
-    D -- "КУ 09" --> F[Режим стирания ППЗУ]
-    D -- "КУ 10" --> G[Режим тестирования ППЗУ]
-    D -- "КУ 04" --> H{"NAND не переполнен"}
-    D -- "КУ 07" --> J[Режим вывода данных]
-    D -- "КУ 12" --> K[Режим выключения]
-    D -- "Иная допустимая КУ" --> E
-
-    H -- Да --> I[Режим наблюдений]
-    H -- Нет --> E
-
-    F --> E
-    G --> E
-    J --> E
-
-    I -- "КУ 06" --> E
-    I -- "Переполнение NAND" --> E
-    Z -- "MaskedAlarm == 0" --> E
-
-    F -. "КУ 12" .-> K
-    F -. "MaskedAlarm != 0" .-> Z
-
-    G -. "КУ 12" .-> K
-    G -. "MaskedAlarm != 0" .-> Z
-
-    I -. "КУ 12" .-> K
-    I -. "MaskedAlarm != 0" .-> Z
-
-    J -. "КУ 12" .-> K
-    J -. "MaskedAlarm != 0" .-> Z
-
-    Z -. "КУ 12" .-> K
-
-    K --> K1{"Снятие питания"}
-    K1 -- Да --> L([Конец])
-    K1 -- Нет --> K2["КУ 02<br/>Запрос статуса"]
-    K2 --> K
+    B --> C{"Инициализация завершена<br/>и MaskedAlarm == 0?"}
+    C -- Да --> D[Дежурный режим DUTY]
+    C -- Нет --> E[Аварийный режим ALARM]
+    D --> F{"Получена допустимая КУ?"}
+    F -- Да --> G{"Тип команды"}
+    G -- " CMD_OBSERVE_START " --> H[Режим наблюдений OBSERVE]
+    G -- " CMD_ERASE " --> I[Режим стирания NAND ERASE]
+    G -- " CMD_TEST " --> J[Режим тестирования NAND TEST]
+    G -- " CMD_DUMP " --> K[Режим вывода данных DUMP]
+    G -- " Иная допустимая КУ " --> D
+    F -- Нет --> M{"MaskedAlarm != 0?"}
+    M -- Да --> E
+    M -- Нет --> D
+    H -. " MaskedAlarm != 0 " .-> E
+    I -. " MaskedAlarm != 0 " .-> E
+    J -. " MaskedAlarm != 0 " .-> E
+    K -. " MaskedAlarm != 0 " .-> E
+    E -. " CMD_SHUTDOWN " .-> L
+    H -. " CMD_SHUTDOWN " .-> L
+    I -. " CMD_SHUTDOWN " .-> L
+    J -. " CMD_SHUTDOWN " .-> L
+    K -. " CMD_SHUTDOWN " .-> L
+    G -- " CMD_SHUTDOWN " --> L[Режим выключения SHUTDOWN]
+    H -- " CMD_DUTY / NAND_FULL " --> D
+    I -- " ERASE_DONE / CMD_DUTY " --> D
+    J -- " TEST_DONE / CMD_DUTY " --> D
+    K -- " DUMP_DONE / CMD_DUTY " --> D
+    E --> N{"MaskedAlarm == 0?"}
+    N -- Да --> D
+    N -- Нет --> E
+    L --> O{"Питание снято?"}
+    O -- Нет --> Q["Разрешена только CMD_STATUS_REQ"]
+    O -- Да --> P([Конец])
+    Q --> L
