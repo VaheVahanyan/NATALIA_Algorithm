@@ -1,36 +1,99 @@
 flowchart TD
-    A([Подача питания]) --> B[Инициализация]
-    B --> C{"Инициализация завершена<br/>и MaskedAlarm == 0?"}
-    C -- Да --> D[Дежурный режим DUTY]
-    C -- Нет --> E[Аварийный режим ALARM]
-    D --> F{"Получена допустимая КУ?"}
-    F -- Да --> G{"Тип команды"}
-    G -- " CMD_OBSERVE_START " --> H[Режим наблюдений OBSERVE]
-    G -- " CMD_ERASE " --> I[Режим стирания NAND ERASE]
-    G -- " CMD_TEST " --> J[Режим тестирования NAND TEST]
-    G -- " CMD_DUMP " --> K[Режим вывода данных DUMP]
-    G -- " Иная допустимая КУ " --> D
-    F -- Нет --> M{"MaskedAlarm != 0?"}
-    M -- Да --> E
-    M -- Нет --> D
-    H -. " MaskedAlarm != 0 " .-> E
-    I -. " MaskedAlarm != 0 " .-> E
-    J -. " MaskedAlarm != 0 " .-> E
-    K -. " MaskedAlarm != 0 " .-> E
-    E -. " CMD_SHUTDOWN " .-> L
-    H -. " CMD_SHUTDOWN " .-> L
-    I -. " CMD_SHUTDOWN " .-> L
-    J -. " CMD_SHUTDOWN " .-> L
-    K -. " CMD_SHUTDOWN " .-> L
-    G -- " CMD_SHUTDOWN " --> L[Режим выключения SHUTDOWN]
-    H -- " CMD_DUTY / NAND_FULL " --> D
-    I -- " ERASE_DONE / CMD_DUTY " --> D
-    J -- " TEST_DONE / CMD_DUTY " --> D
-    K -- " DUMP_DONE / CMD_DUTY " --> D
-    E --> N{"MaskedAlarm == 0?"}
-    N -- Да --> D
-    N -- Нет --> E
-    L --> O{"Питание снято?"}
-    O -- Нет --> Q["Разрешена только CMD_STATUS_REQ"]
-    O -- Да --> P([Конец])
-    Q --> L
+    A([Подача питания]) --> B[INIT<br/>Инициализация аппаратных ресурсов<br/>Загрузка конфигурации и служебных данных]
+    B --> C{"INIT завершен<br/>и MaskedAlarm == 0?"}
+    C -- Да --> D[DUTY<br/>Дежурный режим]
+    C -- Нет --> E[ALARM<br/>Аварийный режим]
+
+    D --> F{"Получена КУ?"}
+    F -- Нет --> G{"MaskedAlarm != 0?"}
+    G -- Да --> E
+    G -- Нет --> D
+
+    F -- Да --> H{"КУ допустима<br/>в DUTY?"}
+    H -- Нет --> D
+    H -- Да --> I{"Тип КУ"}
+
+    I -- "CMD_STATUS_REQ / CMD_TELEM_REQ / CMD_SET_TIME / CMD_TEST_RESULT / CMD_DUTY" --> D
+    I -- "CMD_SET_CFG" --> J["Обновить конфигурацию<br/>Записать обе копии MRAM<br/>Пересчитать MaskedAlarm"]
+    J --> K{"MaskedAlarm == 0?"}
+    K -- Да --> D
+    K -- Нет --> E
+
+    I -- "CMD_OBSERVE_START" --> H1{"Запуск OBSERVE допустим?"}
+    H1 -- Нет --> D
+    H1 -- Да --> L[OBSERVE<br/>Режим наблюдений]
+
+    I -- "CMD_ERASE" --> M[ERASE<br/>Режим стирания NAND]
+    I -- "CMD_TEST" --> N[TEST<br/>Режим тестирования NAND]
+    I -- "CMD_DUMP" --> O[DUMP<br/>Режим вывода данных]
+    I -- "CMD_SHUTDOWN" --> P[SHUTDOWN<br/>Режим выключения]
+
+    %% OBSERVE
+    L --> L1{"Событие в OBSERVE"}
+    L1 -- "CMD_OBSERVE_CTRL / CMD_STATUS_REQ / CMD_TELEM_REQ / КТ / RTC_1HZ / PED_TG" --> L
+    L1 -- "CMD_DUTY" --> L2["Мягко завершить OBSERVE<br/>Завершить текущий формат НИ<br/>Сформировать финальный формат Телеметрия<br/>Дополнить последний пакет AAAAh"]
+    L2 --> D
+    L1 -- "NAND_FULL" --> L3["Завершить текущую согласованную запись<br/>Проставить признак переполнения банка"]
+    L3 --> D
+    L1 -- "CMD_SHUTDOWN" --> L4["Мягко завершить OBSERVE<br/>Завершить текущий формат НИ<br/>Сформировать финальный формат Телеметрия<br/>Дополнить последний пакет AAAAh"]
+    L4 --> P
+    L1 -- "MaskedAlarm != 0" --> L5{"Авария связана с NAND?"}
+    L5 -- Нет --> L6["Быстро завершить текущий формат НИ<br/>Записать его в NAND"]
+    L6 --> E
+    L5 -- Да --> E
+
+    %% ERASE
+    M --> M1{"Событие в ERASE"}
+    M1 -- "CMD_STATUS_REQ" --> M
+    M1 -- "ERASE_DONE" --> M2["Обновить состояние банка<br/>Сбросить признак переполнения<br/>Увеличить счетчик стираний<br/>Обновить MRAM"]
+    M2 --> D
+    M1 -- "CMD_DUTY" --> M3["Завершить режим ERASE<br/>по правилу текущего цикла"]
+    M3 --> D
+    M1 -- "CMD_SHUTDOWN" --> M4["Завершить режим ERASE<br/>по правилу текущего цикла"]
+    M4 --> P
+    M1 -- "MaskedAlarm != 0" --> E
+
+    %% TEST
+    N --> N1{"Событие в TEST"}
+    N1 -- "CMD_STATUS_REQ" --> N
+    N1 -- "TEST_DONE" --> N2["Обновить валидный результат теста<br/>Увеличить счетчик тестов<br/>Обновить MRAM"]
+    N2 --> D
+    N1 -- "CMD_DUTY" --> N3["Завершить текущую фазу TEST"]
+    N3 --> D
+    N1 -- "CMD_SHUTDOWN" --> N4["Завершить текущую фазу TEST"]
+    N4 --> P
+    N1 -- "Ошибка записи Nerr в MRAM" --> N5["Результат теста невалиден"]
+    N5 --> D
+    N1 -- "MaskedAlarm != 0" --> E
+
+    %% DUMP
+    O --> O1{"Событие в DUMP"}
+    O1 -- "CMD_STATUS_REQ" --> O
+    O1 -- "DUMP_DONE" --> O2["Зафиксировать число переданных пакетов<br/>Обновить last_dumped_packet<br/>Обновить MRAM"]
+    O2 --> D
+    O1 -- "CMD_DUTY" --> O3["Завершить передачу текущего пакета<br/>Обновить last_dumped_packet в MRAM"]
+    O3 --> D
+    O1 -- "CMD_SHUTDOWN" --> O4["Завершить передачу текущего пакета<br/>Обновить last_dumped_packet в MRAM"]
+    O4 --> P
+    O1 -- "MaskedAlarm != 0" --> E
+
+    %% ALARM
+    E --> E0["Привести систему к безопасной конфигурации<br/>Отключить ПЭД<br/>Отключить NAND1 и NAND2"]
+    E0 --> E1{"Событие в ALARM"}
+    E1 -- "CMD_STATUS_REQ / CMD_TELEM_REQ" --> E
+    E1 -- "CMD_SET_CFG" --> E2["Обновить конфигурацию<br/>Записать обе копии MRAM<br/>Пересчитать MaskedAlarm"]
+    E2 --> E3{"MaskedAlarm == 0?"}
+    E3 -- Да --> D
+    E3 -- Нет --> E
+    E1 -- "CMD_RESET_ALARM" --> E4["Обнулить AlarmStatus<br/>Пересчитать MaskedAlarm"]
+    E4 --> E5{"MaskedAlarm == 0?"}
+    E5 -- Да --> D
+    E5 -- Нет --> E
+    E1 -- "CMD_SHUTDOWN" --> P
+
+    %% SHUTDOWN
+    P --> P1["Остановить или завершить текущую активность<br/>Сохранить служебные данные<br/>Отключить ПЭД и оба банка NAND"]
+    P1 --> Q{"Питание снято?"}
+    Q -- Нет --> R["Разрешена только CMD_STATUS_REQ"]
+    R --> P
+    Q -- Да --> S([Конец])
